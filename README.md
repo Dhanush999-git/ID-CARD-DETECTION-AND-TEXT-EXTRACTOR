@@ -1,0 +1,2 @@
+# ID-CARD-DETECTION-AND-TEXT-EXTRACTOR
+mini project
