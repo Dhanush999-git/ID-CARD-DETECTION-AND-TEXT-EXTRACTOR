@@ -4,8 +4,8 @@
 2. install and activate venv
 3. pip3 install -r requirements-cpu.txt
    or
-3. i) pip3 install tensorflow==2.17.1
-  ii) pip3 install -r requirements-modern.txt
+3. i) pip3 install tensorflow==2.17.1                                                                    
+  ii) pip3 install -r requirements-modern.txt                                                                          
 4. py -3.10 -m venv .venv .\.venv\Scripts\Activate.ps1
    
 # Three Types to run:
