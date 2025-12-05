@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ID Card Detector — Upload & Webcam</title>
+  <style>
+    :root{--bg:#0f1113;--card:#17181a;--muted:#9aa0a6;--accent:#1290ff}
+    body{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;background:var(--bg);color:#f6f7f8}
+    .wrap{max-width:1000px;margin:28px auto;padding:18px;background:var(--card);border-radius:10px}
+    h1{margin:0 0 12px;font-size:20px}
+    .row{display:flex;gap:14px;flex-wrap:wrap}
+    .col{flex:1;min-width:260px}
+    .panel{background:#0f1113;padding:12px;border-radius:8px;border:1px solid #212325}
+    .upload{border:2px dashed #2a2a2a;padding:18px;text-align:center;border-radius:8px;cursor:pointer}
+    .btn{display:inline-block;padding:8px 12px;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;border:none}
+    .btn.secondary{background:#2b2b2b}
+    img.preview{width:100%;border-radius:6px;margin-top:12px}
+    #videoEl{width:100%;border-radius:6px;background:#000}
+    .controls{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}
+    .results{margin-top:14px}
+    .crop{background:#121212;padding:8px;border-radius:6px;margin-bottom:10px}
+    .ocr{background:#0b0b0c;padding:8px;border-radius:6px;color:var(--muted);white-space:pre-wrap}
+    .status{font-size:13px;color:var(--muted);margin-top:6px}
+    .small{font-size:13px;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>ID Card Detector — Upload or Webcam</h1>
+
+    <div class="row">
+      <!-- LEFT: Upload -->
+      <div class="col">
+        <div class="panel">
+          <div class="upload" id="uploadBox">
+            <div><strong>Click to upload an image</strong></div>
+            <div class="small" style="margin-top:8px">Supported: jpg, png. Drag & drop also works.</div>
+            <input id="fileInput" type="file" accept="image/*" style="display:none">
+          </div>
+
+          <img id="previewImg" class="preview" style="display:none" />
+
+          <div class="controls" style="margin-top:8px">
+            <button id="detectUploadBtn" class="btn" style="display:none">Detect (Upload)</button>
+            <label style="display:flex;align-items:center;gap:6px;margin-left:auto" class="small">
+              <input type="checkbox" id="saveCheckbox"> Save on server
+            </label>
+          </div>
+
+          <div id="uploadStatus" class="status"></div>
+        </div>
+
+        <div class="results" id="uploadResults"></div>
+      </div>
+
+      <!-- RIGHT: Webcam -->
+      <div class="col">
+        <div class="panel">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <strong>Webcam</strong>
+            <div class="small">Live capture → detect</div>
+          </div>
+
+          <video id="videoEl" autoplay playsinline></video>
+          <canvas id="hiddenCanvas" style="display:none"></canvas>
+
+          <div class="controls">
+            <button id="startCam" class="btn">Start Camera</button>
+            <button id="stopCam" class="btn secondary" disabled>Stop Camera</button>
+            <button id="captureBtn" class="btn" disabled>Capture & Detect</button>
+            <button id="detectLiveBtn" class="btn" disabled>Detect Current Frame</button>
+          </div>
+
+          <div id="camStatus" class="status">Camera stopped</div>
+        </div>
+
+        <div class="results" id="camResults"></div>
+      </div>
+    </div>
+
+    <!-- HUD (single global display) -->
+    <div style="margin-top:18px" class="panel">
+      <strong>Main HUD (image with boxes):</strong>
+      <img id="hud" style="display:block;margin-top:8px;border-radius:8px;width:100%" />
+    </div>
+  </div>
+
+<script>
+/* ------------------------------
+  Utilities & DOM refs
+-------------------------------*/
+const fileInput = document.getElementById('fileInput');
+const uploadBox = document.getElementById('uploadBox');
+const previewImg = document.getElementById('previewImg');
+const detectUploadBtn = document.getElementById('detectUploadBtn');
+const uploadStatus = document.getElementById('uploadStatus');
+const uploadResults = document.getElementById('uploadResults');
+
+const videoEl = document.getElementById('videoEl');
+const startCam = document.getElementById('startCam');
+const stopCam = document.getElementById('stopCam');
+const captureBtn = document.getElementById('captureBtn');
+const detectLiveBtn = document.getElementById('detectLiveBtn');
+const camStatus = document.getElementById('camStatus');
+const camResults = document.getElementById('camResults');
+
+const hudImg = document.getElementById('hud');
+const saveCheckbox = document.getElementById('saveCheckbox');
+
+const hiddenCanvas = document.getElementById('hiddenCanvas');
+let mediaStream = null;
+
+/* ------------------------------
+  Upload handling
+-------------------------------*/
+uploadBox.addEventListener('click', ()=> fileInput.click());
+uploadBox.addEventListener('dragover', (e)=> { e.preventDefault(); uploadBox.style.opacity=0.9; });
+uploadBox.addEventListener('dragleave', ()=> { uploadBox.style.opacity=1; });
+uploadBox.addEventListener('drop', (e)=> {
+  e.preventDefault();
+  uploadBox.style.opacity=1;
+  const f = e.dataTransfer.files?.[0];
+  if(f) { fileInput.files = e.dataTransfer.files; onFileChosen(f); }
+});
+
+fileInput.addEventListener('change', ()=> {
+  const f = fileInput.files[0];
+  if(f) onFileChosen(f);
+});
+
+function onFileChosen(file) {
+  uploadResults.innerHTML = '';
+  const url = URL.createObjectURL(file);
+  previewImg.src = url;
+  previewImg.style.display = 'block';
+  detectUploadBtn.style.display = 'inline-block';
+  uploadStatus.textContent = '';
+}
+
+detectUploadBtn.addEventListener('click', async ()=>{
+  if(!fileInput.files || !fileInput.files[0]) { alert('Select an image'); return; }
+  detectUploadBtn.disabled = true;
+  uploadStatus.textContent = 'Sending image to server...';
+  uploadResults.innerHTML = '';
+
+  const form = new FormData();
+  form.append('file', fileInput.files[0]);
+
+  const saveParam = saveCheckbox.checked ? '?save=1' : '';
+  try {
+    const res = await fetch('/api/detect' + saveParam, { method:'POST', body: form });
+    const json = await res.json();
+    showResponse(json, uploadResults);
+    uploadStatus.textContent = 'Done';
+  } catch(err) {
+    uploadStatus.textContent = 'Error: ' + err.message;
+  } finally {
+    detectUploadBtn.disabled = false;
+  }
+});
+
+/* ------------------------------
+  Camera handling
+-------------------------------*/
+async function startCamera() {
+  if(mediaStream) return;
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+    videoEl.srcObject = mediaStream;
+    camStatus.textContent = 'Camera running';
+    startCam.disabled = true;
+    stopCam.disabled = false;
+    captureBtn.disabled = false;
+    detectLiveBtn.disabled = false;
+  } catch(err) {
+    camStatus.textContent = 'Camera error: ' + err.message;
+  }
+}
+
+function stopCamera() {
+  if(mediaStream) {
+    mediaStream.getTracks().forEach(t => t.stop());
+    mediaStream = null;
+    videoEl.srcObject = null;
+  }
+  camStatus.textContent = 'Camera stopped';
+  startCam.disabled = false;
+  stopCam.disabled = true;
+  captureBtn.disabled = true;
+  detectLiveBtn.disabled = true;
+}
+
+startCam.addEventListener('click', startCamera);
+stopCam.addEventListener('click', stopCamera);
+
+function captureFrameAsDataURL() {
+  const w = videoEl.videoWidth || 640;
+  const h = videoEl.videoHeight || 480;
+  hiddenCanvas.width = w;
+  hiddenCanvas.height = h;
+  const ctx = hiddenCanvas.getContext('2d');
+  ctx.drawImage(videoEl, 0, 0, w, h);
+  return hiddenCanvas.toDataURL('image/png');
+}
+
+// Capture & auto-send to server (save option respected)
+captureBtn.addEventListener('click', async ()=>{
+  if(!mediaStream) { alert('Start camera first'); return; }
+  const dataUrl = captureFrameAsDataURL();
+  await sendDataURLToServer(dataUrl, camResults, saveCheckbox.checked);
+});
+
+// Detect current frame but do not save unless checkbox checked
+detectLiveBtn.addEventListener('click', async ()=>{
+  if(!mediaStream) { alert('Start camera first'); return; }
+  const dataUrl = captureFrameAsDataURL();
+  await sendDataURLToServer(dataUrl, camResults, saveCheckbox.checked);
+});
+
+/* ------------------------------
+  Send dataURL to /api/detect
+-------------------------------*/
+async function sendDataURLToServer(dataUrl, resultsContainer, saveFlag=false) {
+  resultsContainer.innerHTML = '';
+  hudImg.src = '';
+  hudImg.style.display = 'none';
+  const body = JSON.stringify({ image: dataUrl.split(',')[1] }); // app_flask accepts either full dataURL or plain base64
+  const saveParam = saveFlag ? '?save=1' : '';
+  try {
+    const res = await fetch('/api/detect' + saveParam, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: dataUrl }) // app_flask handles "image" dataURL
+    });
+    const json = await res.json();
+    showResponse(json, resultsContainer);
+  } catch(err) {
+    resultsContainer.innerHTML = `<div class="ocr">Error: ${err.message}</div>`;
+  }
+}
+
+/* ------------------------------
+  Render server response (HUD + crops + OCR)
+-------------------------------*/
+function showResponse(json, resultsContainer) {
+  if(!json) {
+    resultsContainer.innerHTML = '<div class="ocr">No response</div>';
+    return;
+  }
+  // HUD main image
+  if(json.hud) {
+    hudImg.src = json.hud;
+    hudImg.style.display = 'block';
+  }
+
+  // crops
+  resultsContainer.innerHTML = '';
+  if(json.outputs && json.outputs.length>0) {
+    json.outputs.forEach((o, i) => {
+      const div = document.createElement('div');
+      div.className = 'crop';
+      const score = (o.score*100).toFixed(1);
+      const ocrHtml = (o.ocr && o.ocr.length>0) ? o.ocr.map(line => escapeHtml(line)).join('<br>') : '<i class="small">No OCR text</i>';
+      div.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><strong>Detection ${i+1}</strong> <span class="small">(${score}%)</span></div>
+        </div>
+        <img src="${o.crop}" style="margin-top:8px;width:100%;border-radius:6px" />
+        <div class="ocr" style="margin-top:8px"><strong>OCR:</strong><br>${ocrHtml}</div>
+      `;
+      resultsContainer.appendChild(div);
+    });
+  } else {
+    resultsContainer.innerHTML = '<div class="ocr">No detections above threshold</div>';
+  }
+}
+
+/* ------------------------------
+  helpers
+-------------------------------*/
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]); }
+
+/* ------------------------------
+  init: small UX wiring
+-------------------------------*/
+window.addEventListener('beforeunload', ()=> stopCamera());
+</script>
+</body>
+</html>

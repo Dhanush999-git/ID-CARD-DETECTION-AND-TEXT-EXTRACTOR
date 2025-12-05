@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ID Card Detector & Text Extractor</title>
+
+    <!-- OCR is done in backend (TensorFlow + EasyOCR) -->
+
+    <style>
+        /* --- CSS STYLES --- */
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #eef2f3;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        header {
+            background: #2c3e50;
+            color: #fff;
+            padding: 20px;
+            text-align: center;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 1.8rem;
+            letter-spacing: 1px;
+        }
+
+        main {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            background: #fff;
+            width: 100%;
+            max-width: 700px;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        /* Tabs */
+        .tab-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #ddd;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            font-weight: bold;
+            color: #7f8c8d;
+            background: none;
+            border: none;
+            outline: none;
+            border-bottom: 3px solid transparent;
+        }
+
+        .tab.active {
+            color: #2980b9;
+            border-bottom: 3px solid #2980b9;
+        }
+
+        /* Sections */
+        .content-section {
+            display: none;
+        }
+        .content-section.active {
+            display: block;
+        }
+
+        /* File Upload */
+        .file-upload-wrapper {
+            border: 2px dashed #3498db;
+            padding: 30px;
+            border-radius: 8px;
+            background: #f0f8ff;
+            margin-bottom: 15px;
+        }
+
+        /* Camera UI */
+        #camera-stream {
+            width: 100%;
+            max-height: 400px;
+            background: #000;
+            border-radius: 8px;
+            display: none; /* Hidden until started */
+        }
+
+        #captured-photo {
+            width: 100%;
+            border-radius: 8px;
+            display: none;
+            border: 2px solid #2ecc71;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 10px 5px;
+            color: white;
+            transition: 0.3s;
+        }
+
+        .btn-blue { background-color: #3498db; }
+        .btn-blue:hover { background-color: #2980b9; }
+
+        .btn-green { background-color: #27ae60; }
+        .btn-green:hover { background-color: #219150; }
+
+        .btn-orange { background-color: #e67e22; }
+        .btn-orange:hover { background-color: #d35400; }
+
+        .btn-grey {
+            background-color: #7f8c8d;
+        }
+        .btn-grey:hover {
+            background-color: #707b7c;
+        }
+
+        /* Output */
+        .output-box {
+            margin-top: 20px;
+            background: #f9f9f9;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            text-align: left;
+            display: none;
+        }
+
+        #progress-bar {
+            width: 0%;
+            height: 5px;
+            background: #27ae60;
+            margin-top: 10px;
+            transition: width 0.3s;
+        }
+
+        /* Detection HUD image */
+        #hud-result {
+            max-width: 100%;
+            margin-top: 15px;
+            border-radius: 8px;
+            border: 2px solid #3498db;
+            display: none;
+        }
+
+        footer {
+            background: #2c3e50;
+            color: #bdc3c7;
+            text-align: center;
+            padding: 15px;
+            font-size: 0.9rem;
+        }
+        
+        footer strong { color: #fff; }
+
+        .det-block {
+            margin-top: 10px;
+            padding: 8px;
+            border-radius: 6px;
+            background: #fff;
+            border: 1px solid #ddd;
+        }
+
+        .det-block h4 {
+            margin: 0 0 4px;
+            font-size: 0.95rem;
+        }
+
+        .det-block small {
+            color: #777;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>ID CARD DETECTOR AND TEXT EXTRACTOR</h1>
+    </header>
+
+    <main>
+        <div class="container">
+            
+            <!-- Tabs -->
+            <div class="tab-container">
+                <button class="tab active" onclick="switchTab('upload')">Upload Image</button>
+                <button class="tab" onclick="switchTab('camera')">Use Camera</button>
+            </div>
+
+            <!-- SECTION 1: UPLOAD -->
+            <div id="section-upload" class="content-section active">
+                <div class="file-upload-wrapper">
+                    <p>Select an ID Card image file</p>
+                    <input type="file" id="file-input" accept="image/*" onchange="handleFile(this)">
+                </div>
+                <img id="upload-preview" style="max-width:100%; display:none; border-radius:8px; margin-bottom:10px;">
+                
+                <div>
+                    <button id="btn-extract-upload" class="btn btn-green" style="display:none;" onclick="startExtraction('upload')">
+                        Run Detection & OCR
+                    </button>
+                    <!-- NEW: Re-upload button -->
+                    <button id="btn-reupload" class="btn btn-grey" style="display:none;" onclick="reuploadImage()">
+                        Re-upload Image
+                    </button>
+                </div>
+            </div>
+
+            <!-- SECTION 2: CAMERA -->
+            <div id="section-camera" class="content-section">
+                <!-- Step 1: Start Camera Button -->
+                <div id="cam-start-area">
+                    <p>Click below to access your camera</p>
+                    <button class="btn btn-blue" onclick="startCamera()">Open Camera</button>
+                </div>
+
+                <!-- Step 2: Live Video -->
+                <div id="cam-live-area" style="display:none;">
+                    <video id="camera-stream" autoplay playsinline></video>
+                    <br>
+                    <button class="btn btn-blue" onclick="captureSnapshot()">📸 Click Photo</button>
+                </div>
+
+                <!-- Step 3: Captured Result -->
+                <div id="cam-result-area" style="display:none;">
+                    <canvas id="canvas-hidden" style="display:none;"></canvas>
+                    <img id="captured-photo" alt="Captured ID">
+                    <br>
+                    <button class="btn btn-orange" onclick="retakePhoto()">🔄 Retake</button>
+                    <button class="btn btn-green" onclick="startExtraction('camera')">📝 Run Detection & OCR</button>
+                </div>
+            </div>
+
+            <!-- COMMON PROCESSING AREA -->
+            <div id="processing-ui" style="display:none; margin-top:15px;">
+                <span id="status-text">Processing...</span>
+                <div style="width:100%; background:#ddd; height:5px; margin-top:5px;">
+                    <div id="progress-bar"></div>
+                </div>
+            </div>
+
+            <!-- HUD + OUTPUT -->
+            <img id="hud-result" alt="Detection HUD">
+
+            <div id="output-area" class="output-box">
+                <h3>Detected Regions & Extracted Text</h3>
+                <div id="detections-list"></div>
+
+                <!-- NEW: Copy all text button -->
+                <button id="copy-btn" class="btn btn-blue" style="margin-top:10px; display:none;" onclick="copyAllText()">
+                    Copy All Text
+                </button>
+            </div>
+
+        </div>
+    </main>
+
+    <footer>
+        Developed by <strong>DHANUSH AND TEAM</strong>
+    </footer>
+
+    <script>
+        // --- GLOBALS ---
+        let videoStream = null;
+        const videoEl = document.getElementById('camera-stream');
+        const canvasEl = document.getElementById('canvas-hidden');
+        const photoEl = document.getElementById('captured-photo');
+        const fileInput = document.getElementById('file-input');
+
+        // store last OCR result for copy button
+        let lastExtractedText = "";
+
+        // --- TAB SWITCHING ---
+        function switchTab(mode) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
+            
+            document.getElementById('output-area').style.display = 'none';
+            document.getElementById('hud-result').style.display = 'none';
+            document.getElementById('processing-ui').style.display = 'none';
+            document.getElementById('copy-btn').style.display = 'none';
+
+            if(mode === 'upload') {
+                document.querySelector('.tab:nth-child(1)').classList.add('active');
+                document.getElementById('section-upload').classList.add('active');
+                stopCamera();
+            } else {
+                document.querySelector('.tab:nth-child(2)').classList.add('active');
+                document.getElementById('section-camera').classList.add('active');
+                document.getElementById('cam-start-area').style.display = 'block';
+                document.getElementById('cam-live-area').style.display = 'none';
+                document.getElementById('cam-result-area').style.display = 'none';
+            }
+        }
+
+        // --- FILE UPLOAD LOGIC ---
+        function handleFile(input) {
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const img = document.getElementById('upload-preview');
+                    img.src = e.target.result;
+                    img.style.display = 'block';
+                    document.getElementById('btn-extract-upload').style.display = 'inline-block';
+                    document.getElementById('btn-reupload').style.display = 'inline-block';
+                    document.getElementById('output-area').style.display = 'none';
+                    document.getElementById('hud-result').style.display = 'none';
+                    document.getElementById('copy-btn').style.display = 'none';
+                }
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+        // NEW: re-upload function for upload tab
+        function reuploadImage() {
+            // clear previous selection
+            fileInput.value = "";
+            document.getElementById('upload-preview').style.display = 'none';
+            document.getElementById('btn-extract-upload').style.display = 'none';
+            document.getElementById('btn-reupload').style.display = 'none';
+            document.getElementById('output-area').style.display = 'none';
+            document.getElementById('hud-result').style.display = 'none';
+            document.getElementById('copy-btn').style.display = 'none';
+            lastExtractedText = "";
+            // open file chooser again
+            fileInput.click();
+        }
+
+        // --- CAMERA LOGIC ---
+        async function startCamera() {
+            try {
+                videoStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }
+                });
+                videoEl.srcObject = videoStream;
+                videoEl.style.display = 'block';
+
+                document.getElementById('cam-start-area').style.display = 'none';
+                document.getElementById('cam-live-area').style.display = 'block';
+                document.getElementById('cam-result-area').style.display = 'none';
+
+            } catch (err) {
+                alert("Error accessing camera: " + err.message + "\n(Note: Camera requires HTTPS or localhost)");
+            }
+        }
+
+        function captureSnapshot() {
+            if (!videoStream) return;
+
+            canvasEl.width = videoEl.videoWidth;
+            canvasEl.height = videoEl.videoHeight;
+            const ctx = canvasEl.getContext('2d');
+            ctx.drawImage(videoEl, 0, 0);
+
+            const dataUrl = canvasEl.toDataURL('image/png');
+            photoEl.src = dataUrl;
+            photoEl.style.display = 'block';
+
+            stopCamera();
+
+            document.getElementById('cam-live-area').style.display = 'none';
+            document.getElementById('cam-result-area').style.display = 'block';
+        }
+
+        function retakePhoto() {
+            photoEl.src = "";
+            document.getElementById('output-area').style.display = 'none';
+            document.getElementById('hud-result').style.display = 'none';
+            document.getElementById('copy-btn').style.display = 'none';
+            lastExtractedText = "";
+            startCamera();
+        }
+
+        function stopCamera() {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                videoStream = null;
+            }
+        }
+
+        // Helper: dataURL -> Blob
+        function dataURLToBlob(dataURL) {
+            const parts = dataURL.split(',');
+            const byteString = atob(parts[1]);
+            const mimeString = parts[0].match(/:(.*?);/)[1];
+            const ab = new ArrayBuffer(byteString.length);
+            const ia = new Uint8Array(ab);
+            for (let i = 0; i < byteString.length; i++) {
+                ia[i] = byteString.charCodeAt(i);
+            }
+            return new Blob([ab], { type: mimeString });
+        }
+
+        // --- MAIN: CALL BACKEND /api/detect ---
+        async function startExtraction(mode) {
+            const ui = document.getElementById('processing-ui');
+            const bar = document.getElementById('progress-bar');
+            const status = document.getElementById('status-text');
+            const outputBox = document.getElementById('output-area');
+            const hudImg = document.getElementById('hud-result');
+            const detList = document.getElementById('detections-list');
+            const copyBtn = document.getElementById('copy-btn');
+
+            let formData = new FormData();
+
+            if (mode === 'upload') {
+                const file = fileInput.files[0];
+                if (!file) {
+                    alert("Please select an image first.");
+                    return;
+                }
+                formData.append("file", file);
+            } else if (mode === 'camera') {
+                if (!photoEl.src) {
+                    alert("Please capture a photo first.");
+                    return;
+                }
+                const blob = dataURLToBlob(photoEl.src);
+                formData.append("file", blob, "capture.png");
+            }
+
+            ui.style.display = 'block';
+            outputBox.style.display = 'none';
+            hudImg.style.display = 'none';
+            copyBtn.style.display = 'none';
+            bar.style.width = '20%';
+            status.innerText = "Uploading image to server...";
+
+            try {
+                const res = await fetch("/api/detect", {
+                    method: "POST",
+                    body: formData
+                });
+
+                bar.style.width = '60%';
+                status.innerText = "Running detection & OCR on server...";
+
+                if (!res.ok) {
+                    throw new Error("Server error: " + res.status);
+                }
+
+                const data = await res.json();
+
+                bar.style.width = '100%';
+                status.innerText = "Done.";
+
+                // HUD image
+                hudImg.src = data.hud;
+                hudImg.style.display = 'block';
+
+                // Build detections + collect all text
+                detList.innerHTML = "";
+                lastExtractedText = "";
+
+                if (!data.outputs || data.outputs.length === 0) {
+                    detList.innerHTML = "<p style='color:#c0392b;'>No regions detected above the threshold. Try a clearer image or lower min_score on backend.</p>";
+                } else {
+                    data.outputs.forEach((item, idx) => {
+                        const div = document.createElement('div');
+                        const bbox = item.bbox || [0,0,0,0];
+                        const textLines = item.ocr && item.ocr.length ? item.ocr : [];
+                        const textJoined = textLines.join("\n");
+
+                        if (textJoined.trim() !== "") {
+                            lastExtractedText += `Region ${idx + 1} (Score ${(item.score * 100).toFixed(1)}%)\n`;
+                            lastExtractedText += textJoined + "\n\n";
+                        }
+
+                        div.className = "det-block";
+                        div.innerHTML = `
+                            <h4>Region ${idx + 1} &mdash; Score: ${(item.score * 100).toFixed(1)}%</h4>
+                            <small>BBox: [${bbox.join(", ")}]</small>
+                            <p><strong>OCR Text:</strong><br>${textLines.length ? textLines.join("<br>") : "<em>No text detected.</em>"}</p>
+                        `;
+                        detList.appendChild(div);
+                    });
+                }
+
+                outputBox.style.display = 'block';
+
+                if (lastExtractedText.trim() !== "") {
+                    copyBtn.style.display = 'inline-block';
+                }
+
+            } catch (err) {
+                console.error(err);
+                alert("Detection failed: " + err.message);
+            } finally {
+                setTimeout(() => {
+                    ui.style.display = 'none';
+                    bar.style.width = '0%';
+                }, 500);
+            }
+        }
+
+        // NEW: copy all text handler
+        async function copyAllText() {
+            if (!lastExtractedText || lastExtractedText.trim() === "") {
+                alert("No text available to copy.");
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(lastExtractedText);
+                alert("Extracted text copied to clipboard!");
+            } catch (err) {
+                console.error(err);
+                alert("Could not copy text: " + err.message);
+            }
+        }
+    </script>
+</body>
+</html>
